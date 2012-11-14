@@ -1,0 +1,428 @@
+; font/sprite editor (single chars)
+;
+; by @Pentaphobe
+
+set PC, startup
+
+
+; the character we'll remap for preview
+:previewChar		dat	0
+:previewPositionX	dat 20
+:previewPositionY	dat 4
+
+:hexPositionX		dat 20
+:hexPositionY		dat 6
+
+:cursorX		dat	2
+:cursorY		dat 4
+
+:mapPositionX		dat 2
+:mapPositionY		dat 1
+:map		
+			dat 0, 0, 0, 0
+			dat 0, 0, 0, 0
+            dat 0, 0, 0, 0
+			dat 0, 0, 0, 0
+			dat 0, 0, 0, 0
+			dat 0, 0, 0, 0
+			dat 0, 0, 0, 0
+			dat 0, 0, 0, 0            
+            
+            
+:startup
+	set C, 0x0720
+    jsr __clearToColor
+    
+:main
+	set X, [mapPositionX]
+    set Y, [mapPositionY]
+    set Z, map
+    jsr drawMap
+    
+    jsr updatePreview  
+    
+    set [0], [0x8180]
+    set [1], [0x8181]
+    
+    set A, [previewChar]
+    set C, 0xf000
+    set X, [previewPositionX]
+    set Y, [previewPositionY]
+    jsr __drawChar
+    
+    set B, [previewChar]
+    shl B, 1
+    add B, 0x8180
+    
+    set A, __hexPrefix
+    set X, [hexPositionX]
+    set Y, [hexPositionY]
+    jsr __drawString        
+    
+    set A, [B]
+    add X, 2
+    jsr __drawHexWord
+    
+    set A, __hexPrefix
+    add Y, 1
+    sub X, 2
+    add B, 1
+    jsr __drawString        
+    
+    set A, [B]
+    add X, 2
+    jsr __drawHexWord
+    
+    
+    jsr __getchar
+    set [0], A
+    
+    ifn A, "&"
+    	set PC, main_notUP
+	ifg [cursorY], 0        
+      sub [cursorY], 1
+    set PC, main_input_done
+    
+    :main_notUP
+    ifn A, "("
+    	set PC, main_notDOWN
+    ifg 7, [cursorY]
+    	add [cursorY], 1
+	set PC, main_input_done
+    
+    :main_notDOWN    
+    ifn A, "'"
+    	set PC, main_notRIGHT
+    ifg 3, [cursorX]
+      add [cursorX], 1
+    set PC, main_input_done
+    
+    :main_notRIGHT
+    ifn A, "%"
+    	set PC, main_notLEFT
+    ifn [cursorX], 0
+      sub [cursorX], 1
+    set PC, main_input_done
+    
+    :main_notLEFT
+    ifn A, " "
+    	set PC, main_notSPACE
+    jsr toggleMapCell
+	set PC, main_input_done
+    
+	:main_notSPACE
+    ifn A, "c"
+    	set PC, main_notCLEAR
+    jsr clearMap
+    set PC, main_input_done
+    
+    :main_notCLEAR
+    
+    :main_input_done
+    set PC, main
+    
+:shutdown
+	brk
+	set PC, shutdown
+
+:clearMap
+	set PUSH, B
+    set PUSH, C
+    
+    set B, map
+    ; number of bits
+    set C, 32
+    
+    :clearMap_loop
+    	set [B], 0
+        add B, 1
+        sub C, 1
+        ifn C, 0
+        	set PC, clearMap_loop
+            
+	set C, POP
+	set B, POP
+    
+    set PC, POP
+
+:toggleMapCell
+	set PUSH, B
+    set B, [cursorY]
+    shl B, 2
+    add B, [cursorX]
+    add B, map
+    xor [B], 1
+    
+    set B, POP
+	set PC, POP
+
+:updatePreview
+	set PUSH, A
+    set PUSH, B
+    set PUSH, Z
+    set PUSH, X
+    
+	set B, [previewChar]
+	mul B, 2
+    add B, 0x8180
+    set [B], 0xffff
+    
+    set Z, map
+    jsr readPreviewColumn
+
+	set Z, map
+	add Z, 1
+    jsr readPreviewColumn
+
+    add Z, 1    
+    add B, 1
+	jsr readPreviewColumn
+
+    add Z, 1
+    jsr readPreviewColumn
+    
+    set X, POP
+    set Z, POP
+    set B, POP
+    set A, POP
+    
+    set PC, POP
+    
+:readPreviewColumn	; B-memory to modify, Z-map
+	set PUSH, A
+	set PUSH, B
+    set PUSH, C
+    set PUSH, X
+    set PUSH, Z
+    
+    set C, 8
+    
+    ; jump to the bottom of the column
+    ; since the bit order is strange
+	add Z, 28
+    :readPreviewColumn_loop
+    	;shr [B], 1
+        ;set A, [Z]
+        ;shl A, 15        
+        ;bor [B], A
+        shl [B], 1
+        bor [B], [Z]
+        
+        sub Z, 4
+        sub C, 1
+        ife C, 0
+        	set PC, readPreviewColumn_done        
+        set PC, readPreviewColumn_loop
+        
+	:readPreviewColumn_done
+	set Z, POP
+    set X, POP
+    set C, POP
+    set B, POP
+    set A, POP
+    set PC, POP
+    
+    
+    
+:drawMap	; X, Y - where Z - map
+	set PUSH, X
+    set PUSH, Y
+    set PUSH, Z
+    set PUSH, A
+    set PUSH, B
+    set PUSH, C
+    
+	jsr __getScreenPos
+    
+    set Y, 0
+    :drawMap_yLoop
+    	set X, 0
+    	:drawMap_xLoop
+        	ifn X, [cursorX]
+            	set PC, drawMap_notOnCursor
+            ifn Y, [cursorY]
+            	set PC, drawMap_notOnCursor
+            set C, 0x0420
+            ifn [Z], 0
+            	set C, 0x0c20
+            set PC, drawMap_writeChar
+            
+            :drawMap_notOnCursor
+        	set C, 0x0020            
+			ifn [Z], 0
+            	set C, 0x0f20 ; set a white background color
+                
+            :drawMap_writeChar
+            set [B], C
+            add B, 1
+            ; set it twice horizontally for square pixels
+            set [B], C
+            add B, 1
+            
+            add Z, 1
+            
+            add X, 1
+            ifg 4, X
+            	set PC, drawMap_xLoop
+		
+        ; move B down 1 and back 4 ( * 2 for square pixels)
+        add B, 32
+        ; I have them as separate instructions for clarity
+        sub B, 8
+        
+		add Y, 1
+        ifg 8, Y
+        	set PC, drawMap_yLoop
+	set C, POP
+    set B, POP
+    set A, POP
+    set Z, POP
+    set Y, POP
+    set X, POP
+	set PC, POP
+    
+    
+; ---- standard lib ---
+
+:__getScreenPos
+    ; returns an offset (B) into the screen based on X, Y
+    set B, Y  
+    shl B, 5
+    add B, X    
+    add B, 0x8000    
+    set PC, POP
+ 	
+ :__drawString ; A-pointer to string, X,Y - pos, C - color
+ 	set PUSH, A
+    set PUSH, B
+ 	jsr __getScreenPos
+    :writeLoop
+    	ife [A], 0
+        	set PC, __drawString_done
+    	set [B], C
+        bor [B], [A]
+        add B, 1
+        add A, 1
+        set PC, writeLoop
+    :__drawString_done
+    set B, POP
+    set A, POP
+    set PC, POP
+    
+:__drawChar
+	jsr __getScreenPos
+    set [B], C
+    and A, 0xff
+    bor [B], A
+    set PC, POP
+
+:__clear_screen
+ 	set PUSH, A
+ 	set A, 0x8000
+    :__clear_screen_loop
+    	set [A], 0
+        add A, 1
+        ifg 0x8180, A
+        	set PC, __clear_screen_loop
+    set A, POP
+	set PC, POP
+    
+ :__clearToColor
+ 	set PUSH, A
+    set A, 0x8000    
+    :clearToColor_loop
+    	set [A], C
+        add A, 1
+        ifg 0x8180, A
+        	set PC, clearToColor_loop
+    set A, POP
+    set PC, POP
+    
+
+
+:keyboardBufferPos dat 0
+:getchar_wait_callback dat 0
+:__getchar
+    ; returns char in A
+	set PUSH, B
+	set PUSH, C
+    :__getchar_wait
+    set C, [keyboardBufferPos]
+    add C, 0x9000   
+
+    ifn [C], 0
+    	set PC, __getchar_grabkey
+	jsr __advanceKeyboardBuffer
+    
+    ; here we call main_update to allow general processing
+    ; while waiting for keys
+    ifn [getchar_wait_callback], 0
+      jsr [getchar_wait_callback]
+    
+	set PC, __getchar_wait
+    
+    :__getchar_grabkey
+    set A, [C]    
+    set [C], 0
+	jsr __advanceKeyboardBuffer
+    
+    :__getchar_done
+
+
+	set C, POP
+    set B, POP
+    set PC, POP
+    
+:__advanceKeyboardBuffer
+	add [keyboardBufferPos], 1
+    ifg [keyboardBufferPos], 0xf
+    	set [keyboardBufferPos], 0
+    set PC, POP
+
+
+:__hexDigits dat "0123456789abcdef"
+:__hexPrefix dat "0x", 0
+
+:__drawHexWord	; A-word to write, X,Y-where, C-color
+	set PUSH, A
+    set PUSH, B
+    set PUSH, I
+    set PUSH, J
+    set PUSH, X
+    set PUSH, Y
+    set PUSH, Z
+    
+    jsr __getScreenPos
+    
+    ; shift
+    set J, 12
+    
+    ; number of nibbles in a word
+    set Z, 4
+    :drawHexWord_loop
+    	set PUSH, A
+		
+        shr A, J
+        and A, 0x000f
+        
+        set [B], C
+		bor [B], [__hexDigits + A]
+    
+    	set A, POP
+        
+    	sub Z, 1
+        ife Z, 0
+        	set PC, drawHexWord_done
+        add B, 1
+        shr I, 4
+        sub J, 4
+        set PC, drawHexWord_loop 
+	:drawHexWord_done  
+    set Z, POP
+    set Y, POP
+    set X, POP
+    set J, POP
+    set I, POP
+    set B, POP
+    set A, POP
+    set PC, POP
